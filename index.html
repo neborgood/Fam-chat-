@@ -97,7 +97,6 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
       <h1 id="rtitle">Family</h1>
       <small id="rcount"></small>
     </div>
-    <div class="hbtn" id="notifbtn">🔔</div>
     <div class="hbtn" id="leavebtn">Leave</div>
   </header>
   <div id="msgs"></div>
@@ -112,12 +111,6 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 <script>
 var SURL = 'https://rqpwdutwbarexyivfeqz.supabase.co';
 var SKEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxcHdkdXR3YmFyZXh5aXZmZXF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMTc4NTgsImV4cCI6MjA5MTg5Mzg1OH0.I-BS0HsjLnCNr8IQJNrfuagV3pOggqBnmxlprnOSYCQ';
-// !! PASTE YOUR RENDER URL HERE AFTER DEPLOYING !!
-var PUSH_SERVER = 'https://frosty-haze-b769.dennyjunk316.workers.dev';
-var VAPID_PUBLIC = 'BPhisKtv3tSJVTNs3Etbphf9vtcdJEDHooqq_rsKDVoZ_j5pjELB46zeGHWb0bs7wiU-W53xLmcqwxWndOVzmfI';
-// Replace this with your Render URL after deploying
-var PUSH_SERVER = 'https://YOUR_RENDER_URL.onrender.com';
-var VAPID_PUBLIC = 'BDJEauPemMNV8JnNBAMaUhPGpE83Mr0rwQ8WhmRmm0O11BVp0O1rlo9oTXngvzw3w_vHveyA1yP9togdeLHyJ_U';
 var COLS = ['#c0392b','#e67e22','#d4a017','#27ae60','#1a7a4a','#2980b9','#8e44ad','#c0587e','#5a7a5c','#8b5e3c'];
 
 // PWA manifest
@@ -214,7 +207,6 @@ async function join() {
   hide('login'); show('chat','flex');
   document.getElementById('rtitle').textContent = myRoom;
   document.getElementById('snd').disabled = false;
-  document.getElementById('notifbtn').onclick = enableNotif;
   await loadHistory();
   startRealtime();
   startPolling();
@@ -271,7 +263,7 @@ async function sendMsg() {
   render({id:tmpId,room:myRoom,sender:myName,color:myColor,text:txt,type:'msg',created_at:new Date().toISOString()});
   var res = await sb.from('messages').insert({room:myRoom,sender:myName,color:myColor,text:txt,type:'msg'}).select().single();
   if (res.error) toast('Error: ' + res.error.message);
-  else if (res.data) { cache[res.data.id]=true; lastTs=res.data.created_at; pushNotify(txt); }
+  else if (res.data) { cache[res.data.id]=true; lastTs=res.data.created_at; }
 }
 
 async function sendSys(txt) {
@@ -312,69 +304,16 @@ function askNotif() {
   if (typeof Notification==='undefined') return;
   if (Notification.permission!=='default') return;
   if (localStorage.notif_no) return;
-  enableNotif();
+  if (confirm('Get notified when family messages you?')) {
+    Notification.requestPermission().then(function(p){ toast(p==='granted'?'Notifications on!':'Blocked'); });
+  } else { localStorage.notif_no=1; }
 }
-
-function urlBase64ToUint8Array(base64String) {
-  var padding = '='.repeat((4 - base64String.length % 4) % 4);
-  var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  var rawData = window.atob(base64);
-  var outputArray = new Uint8Array(rawData.length);
-  for (var i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
-
-function enableNotif() {
-  if (typeof Notification === 'undefined') { toast('Notifications not supported on this browser'); return; }
-  if (Notification.permission === 'denied') { toast('Notifications blocked - go to Chrome site settings to allow'); return; }
-  Notification.requestPermission().then(function(p) {
-    if (p !== 'granted') { toast('Notifications not allowed'); return; }
-    if (!('serviceWorker' in navigator)) { toast('Service worker not supported'); return; }
-    navigator.serviceWorker.ready.then(function(reg) {
-      reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC)
-      }).then(function(sub) {
-        return fetch(PUSH_SERVER + '/subscribe', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({room: myRoom, name: myName, subscription: sub})
-        });
-      }).then(function() {
-        toast('Notifications on! You will be alerted even when app is closed');
-      }).catch(function(e) {
-        toast('Notif setup failed: ' + e.message);
-      });
-    });
-  });
-}
-
-// notifbtn wired in join()
 
 function notify(msg) {
-  // This is called on the RECEIVER side from polling/realtime
-  // The push notification is sent from the SENDER side via pushNotify()
-  // This handles the case when app is open but not focused
   if (msg.sender===myName || msg.type==='system') return;
   if (typeof Notification==='undefined' || Notification.permission!=='granted') return;
   if (document.visibilityState==='visible' && document.hasFocus()) return;
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.ready.then(function(reg) {
-      reg.showNotification(msg.sender + ' - Family Chat', {
-        body: msg.text.slice(0,80), tag:'fc', renotify:true, vibrate:[200,100,200]
-      });
-    });
-  }
-}
-
-function pushNotify(text) {
-  // Called when YOU send a message — server pushes to everyone else
-  if (PUSH_SERVER.indexOf('YOUR_RENDER_URL') !== -1) return; // not set up yet
-  fetch(PUSH_SERVER + '/notify', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({room: myRoom, sender: myName, text: text})
-  }).catch(function(){});
+  new Notification(msg.sender + ' - Family Chat', {body:msg.text.slice(0,80), tag:'fc', renotify:true});
 }
 
 document.getElementById('leavebtn').onclick = async function() {
@@ -382,9 +321,6 @@ document.getElementById('leavebtn').onclick = async function() {
   await sendSys(myName+' left');
   if (rtSub) sb.removeChannel(rtSub);
   if (pollTimer) clearInterval(pollTimer);
-  if (PUSH_SERVER.indexOf('YOUR_RENDER_URL') === -1) {
-    fetch(PUSH_SERVER + '/unsubscribe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:myRoom,name:myName})}).catch(function(){});
-  }
   hide('chat'); show('login');
   document.getElementById('msgs').innerHTML='';
   cache={}; members={}; lastSender=null; lastDate=null; lastTs=null;
