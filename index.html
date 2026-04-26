@@ -97,6 +97,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
       <h1 id="rtitle">Family</h1>
       <small id="rcount"></small>
     </div>
+    <div class="hbtn" id="notifbtn">🔔</div>
     <div class="hbtn" id="leavebtn">Leave</div>
   </header>
   <div id="msgs"></div>
@@ -111,6 +112,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 <script>
 var SURL = 'https://rqpwdutwbarexyivfeqz.supabase.co';
 var SKEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxcHdkdXR3YmFyZXh5aXZmZXF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMTc4NTgsImV4cCI6MjA5MTg5Mzg1OH0.I-BS0HsjLnCNr8IQJNrfuagV3pOggqBnmxlprnOSYCQ';
+// !! PASTE YOUR RENDER URL HERE AFTER DEPLOYING !!
+var PUSH_SERVER = 'https://frosty-haze-b769.dennyjunk316.workers.dev';
+var VAPID_PUBLIC = 'BPhisKtv3tSJVTNs3Etbphf9vtcdJEDHooqq_rsKDVoZ_j5pjELB46zeGHWb0bs7wiU-W53xLmcqwxWndOVzmfI';
+// Replace this with your Render URL after deploying
+var PUSH_SERVER = 'https://YOUR_RENDER_URL.onrender.com';
+var VAPID_PUBLIC = 'BDJEauPemMNV8JnNBAMaUhPGpE83Mr0rwQ8WhmRmm0O11BVp0O1rlo9oTXngvzw3w_vHveyA1yP9togdeLHyJ_U';
 var COLS = ['#c0392b','#e67e22','#d4a017','#27ae60','#1a7a4a','#2980b9','#8e44ad','#c0587e','#5a7a5c','#8b5e3c'];
 
 // PWA manifest
@@ -123,6 +130,15 @@ document.getElementById('mf').href = URL.createObjectURL(new Blob([JSON.stringif
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(function(){});
 }
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function(OneSignal) {
+  await OneSignal.init({
+    appId: '88685ce0-1896-4c87-9c54-35f9fca1e72e',
+    safari_web_id: 'web.onesignal.auto.2473987d-7114-4e84-8494-f768208d432f',
+    notifyButton: { enable: false },
+    allowLocalhostAsSecureOrigin: true
+  });
+});
 
 // State
 var sb, myName, myColor, myRoom, pollTimer, rtSub;
@@ -146,6 +162,23 @@ document.getElementById('idism').onclick = function() {
   document.getElementById('ibanner').classList.remove('on');
   localStorage.pwa_done = 1;
 };
+
+// Load OneSignal
+var os = document.createElement('script');
+os.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
+os.defer = true;
+os.onload = function() {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: '88685ce0-1896-4c87-9c54-35f9fca1e72e',
+      safari_web_id: 'web.onesignal.auto.2473987d-7114-4e84-8494-f768208d432f',
+      notifyButton: { enable: false },
+      allowLocalhostAsSecureOrigin: true
+    });
+  });
+};
+document.head.appendChild(os);
 
 // Load supabase from CDN
 var scr = document.createElement('script');
@@ -207,12 +240,24 @@ async function join() {
   hide('login'); show('chat','flex');
   document.getElementById('rtitle').textContent = myRoom;
   document.getElementById('snd').disabled = false;
+  document.getElementById('notifbtn').onclick = enableNotif;
   await loadHistory();
   startRealtime();
   startPolling();
   sendSys(myName + ' joined');
   scroll();
   setTimeout(askNotif, 3000);
+  if (typeof OneSignalDeferred !== 'undefined') {
+    OneSignalDeferred.push(async function(OS) {
+      try { await OS.User.addTags({ name: myName, room: myRoom }); } catch(e){}
+    });
+  }
+  // Tag user with OneSignal for targeting
+  if (typeof OneSignalDeferred !== 'undefined') {
+    OneSignalDeferred.push(async function(OneSignal) {
+      try { await OneSignal.User.addTags({ name: myName, room: myRoom }); } catch(e){}
+    });
+  }
 }
 
 async function loadHistory() {
@@ -263,7 +308,27 @@ async function sendMsg() {
   render({id:tmpId,room:myRoom,sender:myName,color:myColor,text:txt,type:'msg',created_at:new Date().toISOString()});
   var res = await sb.from('messages').insert({room:myRoom,sender:myName,color:myColor,text:txt,type:'msg'}).select().single();
   if (res.error) toast('Error: ' + res.error.message);
-  else if (res.data) { cache[res.data.id]=true; lastTs=res.data.created_at; }
+  else if (res.data) {
+    cache[res.data.id]=true; lastTs=res.data.created_at;
+    // Send push via OneSignal to everyone in this room
+    fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Key os_v2_app_rbufzyayszgiphcugx47ziphfzpxl2tbqwueize2q54ovm5ylgog4yzodmng4srgpmdkc7san6bo4o6gj5d2itqg24spjvyq7aoncwa'
+      },
+      body: JSON.stringify({
+        app_id: '88685ce0-1896-4c87-9c54-35f9fca1e72e',
+        filters: [
+          { field: 'tag', key: 'room', relation: '=', value: myRoom },
+          { operator: 'AND' },
+          { field: 'tag', key: 'name', relation: '!=', value: myName }
+        ],
+        headings: { en: myName + ' - Family Chat' },
+        contents: { en: txt.slice(0, 100) },
+        web_url: 'https://neborgood.github.io/Family-chat/'
+      })
+    }).catch(function(){}); }
 }
 
 async function sendSys(txt) {
@@ -304,16 +369,65 @@ function askNotif() {
   if (typeof Notification==='undefined') return;
   if (Notification.permission!=='default') return;
   if (localStorage.notif_no) return;
-  if (confirm('Get notified when family messages you?')) {
-    Notification.requestPermission().then(function(p){ toast(p==='granted'?'Notifications on!':'Blocked'); });
-  } else { localStorage.notif_no=1; }
+  enableNotif();
 }
 
+function urlBase64ToUint8Array(base64String) {
+  var padding = '='.repeat((4 - base64String.length % 4) % 4);
+  var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  var rawData = window.atob(base64);
+  var outputArray = new Uint8Array(rawData.length);
+  for (var i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+function enableNotif() {
+  if (typeof OneSignalDeferred === 'undefined') { toast('Notifications loading, try again'); return; }
+  OneSignalDeferred.push(async function(OneSignal) {
+    try {
+      if (OneSignal.Notifications.permission) {
+        await OneSignal.User.addTags({ name: myName, room: myRoom });
+        toast('Notifications already on!');
+        return;
+      }
+      await OneSignal.Notifications.requestPermission();
+      if (OneSignal.Notifications.permission) {
+        await OneSignal.User.addTags({ name: myName, room: myRoom });
+        toast('Notifications on! Works even when app is closed!');
+      } else {
+        toast('Notifications not allowed');
+      }
+    } catch(e) { toast('Error: ' + e.message); }
+  });
+}
+
+
+// notifbtn wired in join()
+
 function notify(msg) {
+  // This is called on the RECEIVER side from polling/realtime
+  // The push notification is sent from the SENDER side via pushNotify()
+  // This handles the case when app is open but not focused
   if (msg.sender===myName || msg.type==='system') return;
   if (typeof Notification==='undefined' || Notification.permission!=='granted') return;
   if (document.visibilityState==='visible' && document.hasFocus()) return;
-  new Notification(msg.sender + ' - Family Chat', {body:msg.text.slice(0,80), tag:'fc', renotify:true});
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(function(reg) {
+      reg.showNotification(msg.sender + ' - Family Chat', {
+        body: msg.text.slice(0,80), tag:'fc', renotify:true, vibrate:[200,100,200]
+      });
+    });
+  }
+}
+
+function pushNotify(text) {
+  // Called when YOU send a message — server pushes to everyone else
+  if (PUSH_SERVER.indexOf('YOUR_RENDER_URL') !== -1) return; // not set up yet
+  fetch(PUSH_SERVER + '/notify', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({room: myRoom, sender: myName, text: text})
+  }).catch(function(){});
 }
 
 document.getElementById('leavebtn').onclick = async function() {
@@ -321,6 +435,9 @@ document.getElementById('leavebtn').onclick = async function() {
   await sendSys(myName+' left');
   if (rtSub) sb.removeChannel(rtSub);
   if (pollTimer) clearInterval(pollTimer);
+  if (PUSH_SERVER.indexOf('YOUR_RENDER_URL') === -1) {
+    fetch(PUSH_SERVER + '/unsubscribe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:myRoom,name:myName})}).catch(function(){});
+  }
   hide('chat'); show('login');
   document.getElementById('msgs').innerHTML='';
   cache={}; members={}; lastSender=null; lastDate=null; lastTs=null;
